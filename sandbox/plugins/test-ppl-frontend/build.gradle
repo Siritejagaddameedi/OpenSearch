@@ -147,7 +147,14 @@ configurations.all {
   exclude group: 'com.github.babbel', module: 'okhttp-aws-signer'
 
   resolutionStrategy {
-    // Align transitive versions with OpenSearch's managed versions
+    // Align transitive versions with OpenSearch's managed versions.
+    // avatica-core and json-path: a newer unified-query snapshot began pulling calcite-babel
+    // (→ avatica-core 1.28.0) and json-path 2.10.0, conflicting with the 1.27.0 / 2.9.0 that the
+    // analytics-engine parent plugin bundles and provides at runtime (both are excluded from this
+    // plugin's own bundle above). Pin to the parent's versions so the build-time conflict resolves
+    // to exactly what loads at runtime.
+    force 'org.apache.calcite.avatica:avatica-core:1.27.0'
+    force 'com.jayway.jsonpath:json-path:2.9.0'
     force "com.google.guava:guava:${versions.guava}"
     force 'com.google.guava:failureaccess:1.0.2'
     force 'com.google.errorprone:error_prone_annotations:2.36.0'
