@@ -62,14 +62,6 @@ public final class ParquetColumnReader implements Closeable {
     private ColumnPageIndex pageIndex;
     private PageCache cache;
 
-    /**
-     * Rotation index for the page decode out-buffer slots. The resident {@link PageCache} holds
-     * off-heap views of the slots the last decode wrote; alternating between two slot families
-     * ("pageValue0"/"pageValue1", ...) guarantees the next decode never overwrites the segments
-     * the current cache still serves. Flipped only after a successful decode.
-     */
-    private int decodeSlot;
-
     /** Optional per-query accumulator; this reader's {@link #stats} are folded in on {@link #close()}. */
     private QueryParquetStats queryStats;
 
@@ -347,17 +339,11 @@ public final class ParquetColumnReader implements Closeable {
         int rows = (int) pageIndex.numRowsOf(pageIdx);
         int presenceWords = (rows + 63) >>> 6;
 
-        // Rotate between two slot families so this decode never overwrites the segments the
-        // still-resident PageCache is serving (its views point at the OTHER family's slots).
-        String valueSlot = "pageValue" + decodeSlot;
-        String offsetsSlot = "pageOffsets" + decodeSlot;
-        String presenceSlot = "pagePresence" + decodeSlot;
-
         long valueCap = (long) rows * ValueLayout.JAVA_LONG.byteSize();
         long offsetsCap = type.isPrimitive() ? 0 : (rows + 1);
-        MemorySegment valueBuf = bufferPool.bytes(valueSlot, Math.max(valueCap, 1));
-        MemorySegment offsets = type.isPrimitive() ? MemorySegment.NULL : bufferPool.ints(offsetsSlot, offsetsCap);
-        MemorySegment presence = bufferPool.longs(presenceSlot, presenceWords);
+        MemorySegment valueBuf = bufferPool.bytes("pageValue", Math.max(valueCap, 1));
+        MemorySegment offsets = type.isPrimitive() ? MemorySegment.NULL : bufferPool.ints("pageOffsets", offsetsCap);
+        MemorySegment presence = bufferPool.longs("pagePresence", presenceWords);
 
         long ffmStart = t ? System.nanoTime() : 0L;
         long rc = RustBridge.decodePageAtRow(
@@ -385,9 +371,9 @@ public final class ParquetColumnReader implements Closeable {
 
             valueCap = Math.max(requiredValueBytes, 1);
             offsetsCap = type.isPrimitive() ? 0 : (actualRows + 1);
-            valueBuf = bufferPool.bytes(valueSlot, valueCap);
-            offsets = type.isPrimitive() ? MemorySegment.NULL : bufferPool.ints(offsetsSlot, offsetsCap);
-            presence = bufferPool.longs(presenceSlot, actualPresenceWords);
+            valueBuf = bufferPool.bytes("pageValue", valueCap);
+            offsets = type.isPrimitive() ? MemorySegment.NULL : bufferPool.ints("pageOffsets", offsetsCap);
+            presence = bufferPool.longs("pagePresence", actualPresenceWords);
 
             long ffmRetryStart = t ? System.nanoTime() : 0L;
             rc = RustBridge.decodePageAtRow(
@@ -418,22 +404,15 @@ public final class ParquetColumnReader implements Closeable {
         PageCache pc = new PageCache();
         pc.firstRow = firstRow;
         pc.lastRow = lastRow;
-        // Serve the decoded page in place: off-heap views of the slots this decode wrote —
-        // zero on-heap copies. The slot rotation above keeps these segments untouched until
-        // the page after next; the pool's arena keeps them valid until the producer closes.
-        pc.presenceBits = presence.asSlice(0, (long) ((pageRows + 63) >>> 6) * ValueLayout.JAVA_LONG.byteSize());
+        pc.presenceBits = presence.asSlice(0, (long) ((pageRows + 63) >>> 6) * ValueLayout.JAVA_LONG.byteSize())
+            .toArray(ValueLayout.JAVA_LONG);
 
         if (type.isPrimitive()) {
-            pc.values = valueBuf.asSlice(0, (long) pageRows * ValueLayout.JAVA_LONG.byteSize());
+            pc.values = valueBuf.asSlice(0, (long) pageRows * ValueLayout.JAVA_LONG.byteSize()).toArray(ValueLayout.JAVA_LONG);
         } else {
-            // BYTE_ARRAY keeps heap copies: BinaryDocValues hands out BytesRef, whose contract
-            // requires a heap byte[]. Presence is still served off-heap.
             pc.byteBuf = valueLen > 0 ? valueBuf.asSlice(0, valueLen).toArray(ValueLayout.JAVA_BYTE) : new byte[0];
             pc.byteOffsets = offsets.asSlice(0, (long) (pageRows + 1) * ValueLayout.JAVA_INT.byteSize()).toArray(ValueLayout.JAVA_INT);
         }
-        // Flip AFTER a successful decode so a failed decode retries into the same family and
-        // the resident cache's views (the other family) were never at risk.
-        decodeSlot ^= 1;
         return pc;
     }
 

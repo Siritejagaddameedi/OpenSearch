@@ -164,6 +164,7 @@ public class ParquetColumnReaderTests extends OpenSearchTestCase {
             writer.write(export.getArrayAddress(), export.getSchemaAddress());
         }
         writer.flush();
+        writer.sync();
         return file;
     }
 
