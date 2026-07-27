@@ -59,8 +59,8 @@ public final class DatasetProvisioner {
 
         String mapping = loadResource(dataset.mappingResourcePath());
         Request createIndex = new Request("PUT", "/" + dataset.indexName);
-        createIndex.setJsonEntity(injectParquetSettings(mapping));
-        client.performRequest(createIndex); // may throw ResponseException (e.g. geo/nested → HTTP 400)
+        createIndex.setJsonEntity(injectParquetSettings(mapping)); // may throw ResponseException (e.g. geo/nested → HTTP 400)
+        client.performRequest(createIndex);
 
         String bulk = loadResource(dataset.bulkResourcePath());
         Request bulkRequest = new Request("POST", "/" + dataset.indexName + "/_bulk");

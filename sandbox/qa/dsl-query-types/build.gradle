@@ -18,9 +18,10 @@
  * :test:framework (added by that plugin). It does NOT depend on sandbox/qa/analytics-engine-rest or
  * sandbox/plugins/test-ppl-frontend, so it is unaffected by their build-classpath state.
  *
- * Query mappings, documents, and query bodies are expressed INLINE in Java (see FieldShape /
- * DslQueryTypeCatalog) — mirroring how server/src/internalClusterTest/.../search/ tests build their
- * index and query in code rather than from mapping.json/bulk.json/q*.json resource files.
+ * Each query type is a folder under src/test/resources/datasets/<type>/ (mapping.json + bulk.json +
+ * dsl/q{N}.json + dsl/expected/q{N}.json golden). DslQueryTypeCatalog lists the types; DslQueryTypesIT
+ * turns every (type, queryNumber) pair into an independent parameterized test that provisions, queries,
+ * and validates against the golden.
  */
 
 apply plugin: 'opensearch.standalone-rest-test'
@@ -40,6 +41,10 @@ java {
 //   ./gradlew :sandbox:qa:dsl-query-types:restTest -Dsandbox.enabled=true
 //   ./gradlew :sandbox:qa:dsl-query-types:restTest -Dsandbox.enabled=true -PrestCluster=host:port
 // Defaults to localhost:9200 (the `./gradlew run` server, cluster name runTask).
+//
+// Goldens (datasets/<type>/dsl/expected/q<N>.json) are the TRUE answer — generated out-of-band by
+// running each dataset on a VANILLA OpenSearch index (default Lucene backend, no parquet settings) and
+// committed. This suite only validates the parquet response against them.
 tasks.register('restTest', Test) {
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath

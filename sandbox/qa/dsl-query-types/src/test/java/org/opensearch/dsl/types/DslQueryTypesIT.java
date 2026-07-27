@@ -8,6 +8,9 @@
 
 package org.opensearch.dsl.types;
 
+import com.carrotsearch.randomizedtesting.annotations.Name;
+import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.client.Request;
@@ -16,24 +19,25 @@ import org.opensearch.test.rest.OpenSearchRestTestCase;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 
 /**
  * Per-query-type DSL integration test. One {@code resources/datasets/<type>/} folder per query type
- * (mapping.json + bulk.json + dsl/q1.json); each provisioned via {@link DatasetProvisioner} and run
- * via {@link DatasetQueryRunner} against the live sandbox server ({@code dsl-query-executor} →
- * Calcite → Substrait → DataFusion). Talks HTTP only — no plugins in the test JVM.
+ * ({@code mapping.json} + {@code bulk.json} + {@code dsl/q{N}.json}); each is provisioned into a
+ * parquet/composite index via {@link DatasetProvisioner} and queried over HTTP against the live
+ * sandbox server. The test JVM loads no plugins — it only sends {@code _search} requests.
  *
- * <p>For each {@link DslQueryTypeCatalog} entry the observed outcome is asserted against the cataloged
- * expectation:
- * <ul>
- *   <li><b>SUPPORTED</b> — query executes (HTTP 200);</li>
- *   <li><b>CONVERSION_ERROR / UNSUPPORTED</b> — query rejected (non-2xx);</li>
- *   <li><b>NOT_PROVISIONABLE</b> — index cannot be created (geo/nested field types rejected by parquet
- *       at HTTP 400), so provisioning is expected to fail.</li>
- * </ul>
- * Green when the catalog matches reality; red only on drift. All entries are evaluated before
- * asserting, so one run reports every drift.
+ * <p>Every {@code (query-type, queryNumber)} pair from {@link DslQueryTypeCatalog} is an
+ * <b>independent</b> parameterized test (one instance per pair via {@link ParametersFactory}). A
+ * failure in one pair — a provisioning rejection, a non-200, or a golden mismatch — fails only that
+ * one test; every other pair still runs. This is deliberate: the suite maps what the parquet engine
+ * can and cannot serve, so unsupported shapes (geo/nested, multi-valued keyword arrays, custom
+ * {@code _id}s) show up as isolated reds rather than aborting the sweep.
+ *
+ * <p>Each test provisions the dataset, runs its query, asserts HTTP 200, and validates the response
+ * against the golden at {@code dsl/expected/q{N}.json} via {@link DslResponseValidator}. Run with
+ * {@code -Dtests.dsl.recordGoldens=true} to (re)record goldens from the live response instead of
+ * asserting — see {@link DslResponseValidator} for the record-vs-validate semantics.
  *
  * <pre>
  *   ./gradlew :sandbox:qa:dsl-query-types:restTest \
@@ -43,6 +47,14 @@ import java.util.Locale;
 public class DslQueryTypesIT extends OpenSearchRestTestCase {
 
     private static final Logger logger = LogManager.getLogger(DslQueryTypesIT.class);
+
+    private final DslQueryTypeCatalog.Entry entry;
+    private final int queryNumber;
+
+    public DslQueryTypesIT(@Name("param") Param param) {
+        this.entry = param.entry;
+        this.queryNumber = param.queryNumber;
+    }
 
     @Override
     protected boolean preserveClusterUponCompletion() {
@@ -54,120 +66,65 @@ public class DslQueryTypesIT extends OpenSearchRestTestCase {
         return true;
     }
 
-    private enum Observed {
-        EXECUTED,     // provisioned + query returned HTTP 200
-        REJECTED,     // provisioned, query returned non-2xx
-        NOT_CREATED   // index could not be created (field type unsupported by parquet)
+    /** One parameterized test = one (query-type, queryNumber) pair. */
+    public static final class Param {
+        final DslQueryTypeCatalog.Entry entry;
+        final int queryNumber;
+
+        Param(DslQueryTypeCatalog.Entry entry, int queryNumber) {
+            this.entry = entry;
+            this.queryNumber = queryNumber;
+        }
+
+        @Override
+        public String toString() {
+            // Drives the per-test display name, e.g. "term/q1".
+            return entry.type + "/q" + queryNumber;
+        }
     }
 
-    public void testDslQueryTypeOutcomes() {
-        List<String> mismatches = new ArrayList<>();
-        List<String> regressions = new ArrayList<>();
-        List<String> nowWorking = new ArrayList<>();
-        int matched = 0;
-        List<DslQueryTypeCatalog.Entry> entries = DslQueryTypeCatalog.all();
-
-        for (DslQueryTypeCatalog.Entry entry : entries) {
-            Observed observed = evaluate(entry);
-            boolean ok;
-
-            switch (entry.outcome) {
-                case SUPPORTED:
-                    ok = observed == Observed.EXECUTED;
-                    if (!ok && observed == Observed.REJECTED) {
-                        regressions.add(entry.type);
-                    }
-                    break;
-                case CONVERSION_ERROR:
-                case UNSUPPORTED:
-                    ok = observed == Observed.REJECTED;
-                    if (!ok && observed == Observed.EXECUTED) {
-                        nowWorking.add(entry.type + " (was " + entry.outcome + ")");
-                    }
-                    break;
-                case NOT_PROVISIONABLE:
-                default:
-                    ok = observed == Observed.NOT_CREATED;
-                    if (!ok) {
-                        nowWorking.add(entry.type + " (was NOT_PROVISIONABLE; index created)");
-                    }
-                    break;
+    @ParametersFactory(shuffle = false)
+    public static Iterable<Object[]> parameters() throws Exception {
+        List<Object[]> params = new ArrayList<>();
+        for (DslQueryTypeCatalog.Entry entry : DslQueryTypeCatalog.all()) {
+            List<Integer> queryNumbers = DatasetQueryRunner.discoverQueryNumbers(entry.dataset, "dsl");
+            if (queryNumbers.isEmpty()) {
+                logger.warn("No dsl/q*.json queries discovered for dataset [{}] — skipping", entry.type);
+                continue;
             }
-
-            String line = String.format(
-                Locale.ROOT,
-                "%-22s %-11s expected=%-17s observed=%s",
-                entry.type,
-                entry.family,
-                entry.outcome,
-                observed
-            );
-            if (ok) {
-                matched++;
-                logger.info("[match]    {}", line);
-            } else {
-                logger.warn("[MISMATCH] {}", line);
-                mismatches.add(line);
+            for (int queryNumber : queryNumbers) {
+                params.add(new Object[] { new Param(entry, queryNumber) });
             }
         }
-
-        logger.info(
-            "DSL query-type outcomes: {}/{} matched; {} mismatches ({} regressions, {} now-working)",
-            matched,
-            entries.size(),
-            mismatches.size(),
-            regressions.size(),
-            nowWorking.size()
-        );
-        if (regressions.isEmpty() == false) {
-            logger.warn("Regressions (expected SUPPORTED but rejected): {}", regressions);
-        }
-        if (nowWorking.isEmpty() == false) {
-            logger.warn("Query types that now work — update DslQueryTypeCatalog: {}", nowWorking);
-        }
-
-        assertTrue(
-            "DSL query-type outcomes drifted from the catalog ("
-                + mismatches.size()
-                + "). Update DslQueryTypeCatalog to reality (or fix the engine):\n"
-                + String.join("\n", mismatches),
-            mismatches.isEmpty()
-        );
+        return params;
     }
 
-    /** Provision the entry's dataset and run its {@code dsl/} query; report what happened (never throws). */
-    private Observed evaluate(DslQueryTypeCatalog.Entry entry) {
-        if (entry.provisionable() == false) {
-            // Expected to fail at index creation (geo/nested on parquet). A successful create is drift.
-            try {
-                DatasetProvisioner.provision(client(), entry.dataset);
-                return Observed.EXECUTED;
-            } catch (Exception e) {
-                return Observed.NOT_CREATED;
-            }
-        }
+    /**
+     * Provision this pair's dataset on the parquet backend, run its query, and validate the response
+     * against the committed golden. Any failure — provisioning rejection, non-200, or golden mismatch —
+     * fails just this test.
+     *
+     * <p>Goldens are the TRUE (vanilla Lucene) answer, generated out-of-band and committed; parquet is
+     * validated against them, so its deviations — null text {@code _source}, multi-valued keyword /
+     * custom-id / geo / nested rejections — surface as red. See {@link DslResponseValidator}.
+     */
+    public void testQueryType() throws Exception {
+        // A provisioning rejection (geo/nested mapping, multi-valued keyword, custom _id) is a real,
+        // expected finding for unsupported shapes on parquet: it fails this one test, not the sweep.
+        DatasetProvisioner.provision(client(), entry.dataset);
 
-        try {
-            DatasetProvisioner.provision(client(), entry.dataset);
-        } catch (Exception e) {
-            logger.warn("Provisioning failed for [{}]: {}", entry.type, e.getMessage());
-            return Observed.REJECTED;
-        }
-
-        List<String> failures = DatasetQueryRunner.runQueries(
-            client(),
-            entry.dataset,
-            "dsl",
-            "json",
-            null, // auto-discover dsl/q*.json
-            (client, dataset, queryBody) -> {
-                Request request = new Request("POST", "/" + dataset.indexName + "/_search");
-                request.setJsonEntity(queryBody);
-                Response response = client.performRequest(request);
-                assertEquals("DSL " + entry.type + ": expected HTTP 200", 200, response.getStatusLine().getStatusCode());
-                return entityAsMap(response);
-            }
+        String queryBody = DatasetProvisioner.loadResource(entry.dataset.queryResourcePath("dsl", "json", queryNumber));
+        Request request = new Request("POST", "/" + entry.dataset.indexName + "/_search");
+        request.setJsonEntity(queryBody);
+        Response response = client().performRequest(request);
+        assertEquals(
+            "DSL " + entry.type + " Q" + queryNumber + ": expected HTTP 200",
+            200,
+            response.getStatusLine().getStatusCode()
         );
-        return failures.isEmpty() ? Observed.EXECUTED : Observed.REJECTED;
+        Map<String, Object> actual = entityAsMap(response);
+
+        String failure = DslResponseValidator.validate(entry.dataset, queryNumber, actual);
+        assertNull(failure, failure);
     }
 }

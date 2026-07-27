@@ -49,4 +49,9 @@ public final class Dataset {
     public String queryResourcePath(String language, String extension, int queryNumber) {
         return "datasets/" + name + "/" + language + "/q" + queryNumber + "." + extension;
     }
+
+    /** Path to the golden expected-response resource for the given language and query number. */
+    public String expectedResponseResourcePath(String language, int queryNumber) {
+        return "datasets/" + name + "/" + language + "/expected/q" + queryNumber + ".json";
+    }
 }

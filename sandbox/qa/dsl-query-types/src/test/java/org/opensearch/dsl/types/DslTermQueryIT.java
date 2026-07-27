@@ -20,14 +20,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Focused integration test for the DSL {@code term} query against the live sandbox server
- * ({@code dsl-query-executor} → Calcite → Substrait → DataFusion over a parquet/composite index).
+ * Focused integration test for the DSL {@code term} query against the live sandbox server, running
+ * over a parquet/composite index (primary=parquet, secondary=lucene) via the standard search path.
  *
- * <p>Unlike {@link DslQueryTypesIT} — which sweeps all query types and only checks HTTP
- * outcome (200 / rejected / not-provisionable) — this test mirrors the depth of the
- * {@code server/.../search/query/*IT} tests: it asserts <b>real result correctness</b> for a
- * single query type. It relies on {@code SearchResponseBuilder} materializing real hits (rows +
- * {@code _source}) from the analytics engine.
+ * <p>Unlike {@link DslQueryTypesIT} — which sweeps every query type and validates each response
+ * against a golden file — this test mirrors the depth of the {@code server/.../search/query/*IT}
+ * tests: it asserts <b>real result correctness</b> (hit count, {@code _source} values, matched
+ * documents) for a single query type, in code rather than from a golden.
  *
  * <p>Dataset: {@code datasets/people/} (5 docs — alice/bob/carol/dave/eve; 3 in seattle, 2 in
  * portland), provisioned into a dual-format index (primary=parquet, secondary=lucene).
