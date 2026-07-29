@@ -128,7 +128,37 @@ public final class DslQueryTypeCatalog {
             e("geo_shape", "geo"),
             e("geo_intersection", "geo"),
             e("geo_within", "geo"),
-            e("geo_disjoint", "geo")
+            e("geo_disjoint", "geo"),
+
+            // ── single-valued-tags variants (probe parquet's multi-value keyword limitation) ──
+            // Same mapping + same query as each parent type, but with `tags` reduced from a multi-valued
+            // array to a bare scalar. The parent types fail on parquet at ingest — "Cannot accept multiple
+            // values for field [tags] of type [keyword]" — so these variants isolate that as the sole
+            // cause: with scalar tags the docs ingest and the parent's query is exercised normally.
+            e("match_all_scalar", "specialized"),
+            e("no_query_scalar", "specialized"),
+            e("match_none_scalar", "specialized"),
+            e("wrapper_scalar", "specialized"),
+            e("term_scalar", "term-level"),
+            e("terms_scalar", "term-level"),
+            e("exists_scalar", "term-level"),
+            e("terms_boost_scalar", "term-level"),
+            e("terms_name_scalar", "term-level"),
+            e("terms_value_type_scalar", "term-level"),
+            e("exists_boost_scalar", "term-level"),
+            e("terms_set_scalar", "term-level"),
+            e("prefix_scalar", "term-level"),
+            e("wildcard_scalar", "term-level"),
+            e("regexp_scalar", "term-level"),
+            e("fuzzy_scalar", "term-level"),
+            e("tags_multi_scalar", "term-level"),
+            e("bool_scalar", "compound"),
+            e("constant_score_scalar", "compound"),
+            e("boosting_scalar", "compound"),
+            e("dis_max_scalar", "compound"),
+            e("function_score_scalar", "scoring"),
+            e("script_score_scalar", "scoring"),
+            e("script_scalar", "scoring")
         );
     }
 }
