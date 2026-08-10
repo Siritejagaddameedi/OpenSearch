@@ -1982,6 +1982,14 @@ public abstract class OpenSearchIntegTestCase extends OpenSearchTestCase {
             .put(IndicesService.INDICES_CACHE_CLEAN_INTERVAL_SETTING.getKey(), "1s")
             .put(featureFlagSettings());
 
+        // When -Dsandbox.enabled=true, the sandbox parquet/analytics/DSL plugin stack is loaded into every
+        // test node (see getMockPlugins()). Its Guice wiring needs StreamTransportService, which the node
+        // only creates when STREAM_TRANSPORT is enabled as a node setting, and the composite/parquet stack
+        // needs the pluggable-dataformat flag. Set both here so every internalClusterTest node can start.
+        if (Boolean.parseBoolean(System.getProperty("sandbox.enabled", "false"))) {
+            builder.put(FeatureFlags.STREAM_TRANSPORT, true).put(FeatureFlags.PLUGGABLE_DATAFORMAT_EXPERIMENTAL_FLAG, true);
+        }
+
         // Enable tracer only when Telemetry Setting is enabled
         if (featureFlagSettings().getAsBoolean(FeatureFlags.TELEMETRY_SETTING.getKey(), false)) {
             builder.put(TelemetrySettings.TRACER_FEATURE_ENABLED_SETTING.getKey(), true);
@@ -2247,7 +2255,41 @@ public abstract class OpenSearchIntegTestCase extends OpenSearchTestCase {
             mocks.add(MockTelemetryPlugin.class);
         }
         mocks.add(TestSystemTemplatesRepositoryPlugin.class);
+        mocks.addAll(sandboxDataFormatPlugins());
         return Collections.unmodifiableList(mocks);
+    }
+
+    /**
+     * When {@code -Dsandbox.enabled=true}, load the sandbox parquet/analytics/DSL plugin stack into every
+     * in-JVM test node so integration tests exercise it. The plugin classes live in the sandbox plugins
+     * (JDK 25) which {@code test:framework} cannot depend on directly, so they are resolved reflectively:
+     * if they are on the test classpath (they are for a {@code server:internalClusterTest} run with
+     * {@code sandbox.enabled=true}) they load; otherwise this is a silent no-op. Loading via the mock-plugin
+     * list means it applies regardless of a test's own {@link #nodePlugins()} override.
+     */
+    @SuppressWarnings("unchecked")
+    private Collection<Class<? extends Plugin>> sandboxDataFormatPlugins() {
+        if (Boolean.parseBoolean(System.getProperty("sandbox.enabled", "false")) == false) {
+            return Collections.emptyList();
+        }
+        final String[] classNames = {
+            "org.opensearch.arrow.allocator.ArrowBasePlugin",
+            "org.opensearch.arrow.flight.transport.FlightStreamPlugin",
+            "org.opensearch.analytics.AnalyticsPlugin",
+            "org.opensearch.composite.CompositeDataFormatPlugin",
+            "org.opensearch.parquet.ParquetDataFormatPlugin",
+            "org.opensearch.be.datafusion.DataFusionPlugin",
+            "org.opensearch.be.lucene.LucenePlugin",
+            "org.opensearch.dsl.DslQueryExecutorPlugin" };
+        final ArrayList<Class<? extends Plugin>> resolved = new ArrayList<>();
+        for (String className : classNames) {
+            try {
+                resolved.add((Class<? extends Plugin>) Class.forName(className));
+            } catch (ClassNotFoundException e) {
+                // Sandbox plugin not on this module's test classpath — skip it.
+            }
+        }
+        return resolved;
     }
 
     public static final class TestSeedPlugin extends Plugin {
