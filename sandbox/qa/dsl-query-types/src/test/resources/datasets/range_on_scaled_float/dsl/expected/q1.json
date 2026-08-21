@@ -1,0 +1,15 @@
+{
+  "hits": {
+    "total": 2,
+    "sources": [
+      {
+        "amount": 2.5,
+        "rank": 2
+      },
+      {
+        "amount": 3.75,
+        "rank": 3
+      }
+    ]
+  }
+}

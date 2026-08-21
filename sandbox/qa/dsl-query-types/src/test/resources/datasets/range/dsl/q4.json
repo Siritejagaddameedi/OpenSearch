@@ -1,0 +1,1 @@
+{ "query": { "range": { "num_double": { "lt": 3.0 } } } }

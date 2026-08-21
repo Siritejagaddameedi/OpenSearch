@@ -1,0 +1,1 @@
+{ "query": { "range": { "code": { "gte": "a", "lte": "z" } } } }

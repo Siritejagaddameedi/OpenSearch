@@ -1,0 +1,1 @@
+{ "query": { "range": { "num_integer": { "gt": 200, "lt": 300 } } } }

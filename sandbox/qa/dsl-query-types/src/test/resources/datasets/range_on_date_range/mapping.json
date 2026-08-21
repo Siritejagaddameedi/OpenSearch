@@ -1,0 +1,7 @@
+{
+  "settings": { "number_of_shards": 1, "number_of_replicas": 0 },
+  "mappings": { "properties": {
+    "period": { "type": "date_range", "format": "strict_date_optional_time||epoch_millis" },
+    "rank": { "type": "integer" }
+  } }
+}

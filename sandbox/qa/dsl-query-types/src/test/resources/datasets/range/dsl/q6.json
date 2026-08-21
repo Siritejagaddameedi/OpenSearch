@@ -1,0 +1,1 @@
+{ "query": { "range": { "num_long": { "gt": 1000, "lte": 3000 } } } }

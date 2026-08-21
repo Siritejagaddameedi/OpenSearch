@@ -1,0 +1,15 @@
+{
+  "hits": {
+    "total": 2,
+    "sources": [
+      {
+        "code": "banana",
+        "rank": 2
+      },
+      {
+        "code": "Cherry",
+        "rank": 3
+      }
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+{ "query": { "range": { "ts": { "gte": 1710000000000, "lte": 1720000000000, "format": "epoch_millis" } } } }

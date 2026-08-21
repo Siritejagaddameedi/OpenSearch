@@ -1,0 +1,1 @@
+{ "query": { "range": { "ip": { "gte": "2001:db8::", "lte": "2001:db8::ffff:ffff:ffff" } } } }

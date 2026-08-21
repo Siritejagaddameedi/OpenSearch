@@ -1,0 +1,1 @@
+{ "query": { "range": { "amount": { "gt": 2.50, "lt": 5.00 } } } }

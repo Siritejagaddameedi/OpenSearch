@@ -1,0 +1,1 @@
+{ "query": { "range": { "amount": { "gte": 2.0, "lte": 4.0 } } } }

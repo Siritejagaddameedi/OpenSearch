@@ -1,0 +1,1 @@
+{ "query": { "range": { "period": { "gte": "2024-02-01", "lte": "2024-02-28", "relation": "INTERSECTS" } } } }
